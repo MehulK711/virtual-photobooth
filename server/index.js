@@ -45,6 +45,10 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
   });
 });
+// --- NEW: Photoshoot Trigger ---
+  socket.on('start-photoshoot', (roomId) => {
+    socket.to(roomId).emit('start-photoshoot');
+  });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
