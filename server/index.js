@@ -18,30 +18,27 @@ const io = new Server(server, {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // Listen for a user trying to join a specific room
   socket.on('join-room', (roomId) => {
-    // Check how many people are currently in this room
     const room = io.sockets.adapter.rooms.get(roomId);
     const numClients = room ? room.size : 0;
 
     if (numClients === 0) {
-      // First person to join -> create the room
       socket.join(roomId);
       socket.emit('room-created', roomId);
-      console.log(`User ${socket.id} created room ${roomId}`);
     } else if (numClients === 1) {
-      // Second person to join -> join the room
       socket.join(roomId);
       socket.emit('room-joined', roomId);
-      
-      // Tell the first person that their partner has arrived!
-      socket.to(roomId).emit('partner-connected', socket.id);
-      console.log(`User ${socket.id} joined room ${roomId}`);
+      // Tell the FIRST person to initiate the WebRTC call
+      socket.to(roomId).emit('partner-connected'); 
     } else {
-      // Third person -> reject them
       socket.emit('room-full', roomId);
-      console.log(`User ${socket.id} rejected from full room ${roomId}`);
     }
+  });
+
+  // --- NEW: WebRTC Signaling Relay ---
+  // When a user sends a WebRTC signal, forward it ONLY to the other person in the room
+  socket.on('webrtc-signal', (data) => {
+    socket.to(data.roomId).emit('webrtc-signal', data.signal);
   });
 
   socket.on('disconnect', () => {
