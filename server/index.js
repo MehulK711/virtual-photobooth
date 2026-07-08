@@ -10,7 +10,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
@@ -28,27 +28,33 @@ io.on('connection', (socket) => {
     } else if (numClients === 1) {
       socket.join(roomId);
       socket.emit('room-joined', roomId);
-      // Tell the FIRST person to initiate the WebRTC call
       socket.to(roomId).emit('partner-connected'); 
     } else {
       socket.emit('room-full', roomId);
     }
   });
 
-  // --- NEW: WebRTC Signaling Relay ---
-  // When a user sends a WebRTC signal, forward it ONLY to the other person in the room
   socket.on('webrtc-signal', (data) => {
     socket.to(data.roomId).emit('webrtc-signal', data.signal);
+  });
+
+  socket.on('start-photoshoot', (roomId) => {
+    socket.to(roomId).emit('start-photoshoot');
+  });
+
+  // --- NEW: Synchronize UI State ---
+  socket.on('theme-change', (data) => {
+    socket.to(data.roomId).emit('theme-change', data.theme);
+  });
+
+  socket.on('filter-change', (data) => {
+    socket.to(data.roomId).emit('filter-change', data.filter);
   });
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
 });
-// --- NEW: Photoshoot Trigger ---
-  socket.on('start-photoshoot', (roomId) => {
-    socket.to(roomId).emit('start-photoshoot');
-  });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

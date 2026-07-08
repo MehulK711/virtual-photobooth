@@ -10,6 +10,20 @@ const ICE_SERVERS = {
   ],
 };
 
+const THEMES = [
+  { id: 'white', name: 'Classic', hex: '#ffffff' },
+  { id: 'cream', name: 'Cream', hex: '#fdfbf7' },
+  { id: 'pink', name: 'Blush', hex: '#fdf2f8' },
+  { id: 'blue', name: 'Sky', hex: '#f0f9ff' },
+  { id: 'black', name: 'Midnight', hex: '#111827', textColor: '#ffffff' },
+];
+
+const FILTERS = [
+  { id: 'none', name: 'Original', css: 'none', canvasFilter: 'none' },
+  { id: 'mono', name: 'B&W', css: 'grayscale(100%) contrast(120%)', canvasFilter: 'grayscale(100%) contrast(120%)' },
+  { id: 'retro', name: 'Retro', css: 'sepia(40%) contrast(110%) brightness(110%) saturate(130%)', canvasFilter: 'sepia(40%) contrast(110%) brightness(110%) saturate(130%)' },
+];
+
 function App() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -21,10 +35,15 @@ function App() {
   const [roomId, setRoomId] = useState(new URLSearchParams(window.location.search).get('room'));
   const [partnerConnected, setPartnerConnected] = useState(false);
   
-  // --- New Photoshoot States ---
+  // --- NEW: Join Room State ---
+  const [joinCode, setJoinCode] = useState('');
+
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isShooting, setIsShooting] = useState(false);
   const [photoStrip, setPhotoStrip] = useState<string[]>([]);
+
+  const [activeTheme, setActiveTheme] = useState(THEMES[0]);
+  const [activeFilter, setActiveFilter] = useState(FILTERS[0]);
 
   const handleCreateRoom = () => {
     const newRoomId = Math.random().toString(36).substring(2, 9);
@@ -32,12 +51,31 @@ function App() {
     setRoomId(newRoomId);
   };
 
+  // --- NEW: Join Room Handler ---
+  const handleJoinRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (joinCode.trim()) {
+      const cleanCode = joinCode.trim().toLowerCase();
+      window.history.pushState({}, '', `?room=${cleanCode}`);
+      setRoomId(cleanCode);
+    }
+  };
+
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
     alert("Room link copied! Send it to your partner.");
   };
 
-  // --- Capture Engine Logic ---
+  const handleThemeChange = (theme: typeof THEMES[0]) => {
+    setActiveTheme(theme);
+    if (roomId) socket.emit('theme-change', { roomId, theme });
+  };
+
+  const handleFilterChange = (filter: typeof FILTERS[0]) => {
+    setActiveFilter(filter);
+    if (roomId) socket.emit('filter-change', { roomId, filter });
+  };
+
   const captureFrame = () => {
     if (!localVideoRef.current || !remoteVideoRef.current || !canvasRef.current) return null;
     
@@ -47,45 +85,40 @@ function App() {
 
     canvas.width = 600;
     canvas.height = 400;
+    ctx.filter = activeFilter.canvasFilter;
 
-    // Draw Local (Mirrored to match screen)
     ctx.save();
     ctx.translate(300, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(localVideoRef.current, 0, 0, 300, 400);
     ctx.restore();
 
-    // Draw Remote (Mirrored to match screen)
     ctx.save();
     ctx.translate(600, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(remoteVideoRef.current, 0, 0, 300, 400);
     ctx.restore();
 
+    ctx.filter = 'none';
     return canvas.toDataURL('image/png');
   };
 
   const startShootingSequence = async () => {
     setIsShooting(true);
     setPhotoStrip([]); 
-    
     const newStrip: string[] = [];
     
-    // Loop 4 times for 4 photos
     for (let i = 0; i < 4; i++) {
-      // 3-2-1 Countdown
       for (let c = 3; c > 0; c--) {
         setCountdown(c);
         await new Promise(r => setTimeout(r, 1000));
       }
       setCountdown(null); 
       
-      // Flash and capture!
       const imgData = captureFrame();
       if (imgData) newStrip.push(imgData);
       setPhotoStrip([...newStrip]); 
       
-      // Pause for a second before starting the next photo countdown
       await new Promise(r => setTimeout(r, 1000));
     }
     
@@ -93,21 +126,17 @@ function App() {
   };
 
   const handleStartClick = () => {
-    socket.emit('start-photoshoot', roomId); // Tell partner to start
-    startShootingSequence(); // Start locally
+    socket.emit('start-photoshoot', roomId); 
+    startShootingSequence(); 
   };
 
-
-// --- Export Engine Logic ---
   const handleDownload = async () => {
     if (photoStrip.length === 0) return;
 
-    // Create an invisible canvas in memory to assemble the final strip
     const finalCanvas = document.createElement('canvas');
     const ctx = finalCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Dimensions to match a classic vertical photobooth strip
     const imgWidth = 600;
     const imgHeight = 400;
     const padding = 40;
@@ -117,11 +146,9 @@ function App() {
     finalCanvas.width = imgWidth + (padding * 2);
     finalCanvas.height = (imgHeight * 4) + (gap * 3) + padding + bottomTextSpace;
 
-    // Fill the background (Classic White)
-    ctx.fillStyle = '#ffffff'; 
+    ctx.fillStyle = activeTheme.hex; 
     ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
 
-    // Convert base64 strings back into HTML Image objects
     const images = await Promise.all(photoStrip.map(src => {
       return new Promise<HTMLImageElement>((resolve) => {
         const img = new Image();
@@ -130,20 +157,16 @@ function App() {
       });
     }));
 
-    // Draw each photo onto the master canvas
     images.forEach((img, index) => {
       const yOffset = padding + (index * (imgHeight + gap));
       ctx.drawImage(img, padding, yOffset, imgWidth, imgHeight);
     });
 
-    // Add the branding text at the bottom
-    ctx.fillStyle = '#9ca3af'; 
+    ctx.fillStyle = activeTheme.id === 'black' ? '#e5e7eb' : '#9ca3af'; 
     ctx.font = 'bold 36px monospace';
     ctx.textAlign = 'center';
-    ctx.letterSpacing = '10px'; // Note: letterSpacing in canvas requires modern browser support
     ctx.fillText('SYNCBOOTH', finalCanvas.width / 2, finalCanvas.height - 45);
 
-    // Trigger the download
     const link = document.createElement('a');
     link.download = `syncbooth-${Date.now()}.png`;
     link.href = finalCanvas.toDataURL('image/png');
@@ -161,7 +184,7 @@ function App() {
           localStreamRef.current = stream;
           if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         } catch (err) {
-          console.warn("Camera locked by another tab, or permissions denied.");
+          console.warn("Camera locked or denied.");
         } finally {
           socket.emit('join-room', roomId);
         }
@@ -211,15 +234,11 @@ function App() {
         }
       });
 
-      // Listen for partner clicking start
-      socket.on('start-photoshoot', () => {
-        startShootingSequence();
-      });
+      socket.on('start-photoshoot', () => startShootingSequence());
+      socket.on('room-full', () => { alert("This room is already full!"); window.location.href = '/'; });
 
-      socket.on('room-full', () => {
-        alert("This room is already full!");
-        window.location.href = '/';
-      });
+      socket.on('theme-change', (theme) => setActiveTheme(theme));
+      socket.on('filter-change', (filter) => setActiveFilter(filter));
     }
 
     return () => {
@@ -229,17 +248,51 @@ function App() {
       socket.off('webrtc-signal');
       socket.off('start-photoshoot');
       socket.off('room-full');
+      socket.off('theme-change');
+      socket.off('filter-change');
     };
   }, [roomId]);
 
+  // --- REDESIGNED: Landing Page ---
   if (!roomId) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <h1 className="text-6xl font-extrabold mb-4 text-indigo-600 tracking-tight">SyncBooth</h1>
-        <p className="text-xl text-gray-500 mb-12 font-medium">Create a virtual room and take photos with friends, anywhere.</p>
-        <button onClick={handleCreateRoom} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xl py-4 px-12 rounded-full shadow-lg transition-transform transform hover:-translate-y-1 hover:shadow-xl">
-          Create a Room
-        </button>
+        <p className="text-xl text-gray-500 mb-12 font-medium">Capture moments together, no matter where you are.</p>
+        
+        <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 flex flex-col items-center w-full max-w-md">
+          
+          <button 
+            onClick={handleCreateRoom} 
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xl py-4 rounded-full shadow-lg transition-transform transform hover:-translate-y-1"
+          >
+            Create a New Room
+          </button>
+
+          <div className="flex items-center w-full my-8">
+            <div className="flex-1 border-t border-gray-200"></div>
+            <span className="px-4 text-gray-400 font-medium text-sm tracking-wider">OR</span>
+            <div className="flex-1 border-t border-gray-200"></div>
+          </div>
+
+          <form onSubmit={handleJoinRoom} className="w-full flex flex-col gap-4">
+            <input
+              type="text"
+              placeholder="Enter Room Code"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-full text-center text-lg font-mono tracking-widest text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow"
+            />
+            <button 
+              type="submit"
+              disabled={!joinCode.trim()}
+              className="w-full bg-gray-900 hover:bg-black disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-lg py-4 rounded-full shadow-md transition-transform transform hover:-translate-y-1 active:translate-y-0"
+            >
+              Join Room
+            </button>
+          </form>
+
+        </div>
       </div>
     );
   }
@@ -249,19 +302,17 @@ function App() {
       <h1 className="text-4xl font-extrabold mb-2 text-indigo-600 tracking-tight">SyncBooth</h1>
       
       <div className="mb-8 flex items-center gap-4 bg-white p-2 pl-4 rounded-full shadow-sm border border-gray-200">
-        <span className="text-sm text-gray-500 font-mono">Room: {roomId}</span>
+        <span className="text-sm text-gray-500 font-mono">Room: <span className="font-bold text-gray-800">{roomId}</span></span>
         <button onClick={copyLink} className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 px-4 rounded-full transition-colors">
           Copy Invite Link
         </button>
       </div>
 
-      {/* Hidden Canvas used for merging photos */}
       <canvas ref={canvasRef} className="hidden" />
 
-      <div className="bg-white p-6 rounded-2xl shadow-2xl border border-gray-100">
-        <div className="relative flex flex-col md:flex-row gap-4">
-          
-          {/* Giant Countdown Overlay */}
+      <div className="bg-white p-8 rounded-3xl shadow-2xl border border-gray-100 max-w-4xl w-full">
+        
+        <div className="flex flex-col md:flex-row justify-center gap-6 mb-8">
           {countdown !== null && (
             <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
               <span className="text-white text-9xl font-black drop-shadow-[0_0_15px_rgba(0,0,0,0.8)] animate-pulse">
@@ -270,24 +321,35 @@ function App() {
             </div>
           )}
 
-          {/* Local User */}
-          <div className="relative w-[300px] h-[400px] bg-gray-900 rounded-xl overflow-hidden shadow-inner flex items-center justify-center">
-            <video ref={localVideoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover transform -scale-x-100" />
-            <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1 rounded-md backdrop-blur-sm">
+          <div className="relative w-full max-w-[400px] aspect-[3/4] bg-gray-900 rounded-2xl overflow-hidden shadow-inner border-4 border-gray-100">
+            <video 
+              ref={localVideoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 transition-all duration-300"
+              style={{ filter: activeFilter.css }} 
+            />
+            <div className="absolute bottom-4 left-4 z-10 bg-black/50 px-3 py-1 rounded-md backdrop-blur-sm">
               <span className="text-white text-sm font-medium">You</span>
             </div>
           </div>
 
-          {/* Remote User */}
-          <div className={`relative w-[300px] h-[400px] rounded-xl overflow-hidden shadow-inner flex flex-col items-center justify-center gap-3 transition-colors ${partnerConnected ? 'bg-gray-900' : 'bg-gray-100 border-2 border-dashed border-gray-300'}`}>
-            <video ref={remoteVideoRef} autoPlay playsInline className={`absolute inset-0 w-full h-full object-cover transform -scale-x-100 ${partnerConnected ? 'opacity-100' : 'opacity-0'}`} />
+          <div className={`relative w-full max-w-[400px] aspect-[3/4] rounded-2xl overflow-hidden shadow-inner border-4 border-gray-100 flex flex-col items-center justify-center gap-3 transition-colors ${partnerConnected ? 'bg-gray-900' : 'bg-gray-50 border-dashed border-gray-300'}`}>
+            <video 
+              ref={remoteVideoRef} 
+              autoPlay 
+              playsInline 
+              className={`absolute inset-0 w-full h-full object-cover transform -scale-x-100 transition-all duration-300 ${partnerConnected ? 'opacity-100' : 'opacity-0'}`}
+              style={{ filter: activeFilter.css }} 
+            />
             
             {!partnerConnected && (
               <>
-                <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
                 </svg>
-                <span className="text-gray-500 font-medium text-sm">Waiting for partner...</span>
+                <span className="text-gray-400 font-medium">Waiting for partner...</span>
               </>
             )}
              {partnerConnected && (
@@ -298,36 +360,75 @@ function App() {
           </div>
         </div>
 
-        <div className="mt-8 flex justify-center">
+        <div className="border-t border-gray-100 pt-8 pb-4 flex flex-col md:flex-row items-center justify-between gap-8">
+          
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">Frame Color</span>
+            <div className="flex gap-3">
+              {THEMES.map(theme => (
+                <button
+                  key={theme.id}
+                  onClick={() => handleThemeChange(theme)} 
+                  className={`w-10 h-10 rounded-full border-2 transition-transform hover:scale-110 shadow-sm ${activeTheme.id === theme.id ? 'border-indigo-500 scale-110 ring-2 ring-indigo-200' : 'border-gray-200'}`}
+                  style={{ backgroundColor: theme.hex }}
+                  title={theme.name}
+                />
+              ))}
+            </div>
+          </div>
+
           <button 
             onClick={handleStartClick}
-            disabled={isShooting}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:transform-none text-white font-bold text-lg py-4 px-12 rounded-full shadow-lg transition-transform transform hover:-translate-y-1 hover:shadow-xl active:translate-y-0"
+            disabled={isShooting} 
+            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:transform-none text-white font-bold text-xl py-4 px-16 rounded-full shadow-lg transition-transform transform hover:-translate-y-1 hover:shadow-xl active:translate-y-0"
           >
             {isShooting ? "Smile!" : "Start Photoshoot"}
           </button>
+
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-bold text-gray-400 uppercase tracking-wider text-right">Photo Filter</span>
+            <div className="flex gap-2">
+              {FILTERS.map(filter => (
+                <button
+                  key={filter.id}
+                  onClick={() => handleFilterChange(filter)} 
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${activeFilter.id === filter.id ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                >
+                  {filter.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
         </div>
       </div>
 
-      {/* Generated Photo Strip Area */}
       {photoStrip.length > 0 && (
-        <div className="mt-12 flex flex-col items-center animate-fade-in-up">
-          <h2 className="text-2xl font-bold mb-6 text-gray-800">Your Photos</h2>
+        <div className="mt-16 flex flex-col items-center animate-fade-in-up">
+          <h2 className="text-2xl font-bold mb-8 text-gray-800">Your Photos</h2>
           
-          {/* The Physical-Looking Strip */}
-          <div className="bg-white p-4 pb-8 rounded-sm shadow-xl flex flex-col gap-2 w-[400px]">
+          <div 
+            className="p-4 pb-8 rounded-sm shadow-2xl flex flex-col gap-2 w-[400px] transition-colors"
+            style={{ backgroundColor: activeTheme.hex }}
+          >
             {photoStrip.map((src, index) => (
               <img key={index} src={src} alt={`Frame ${index + 1}`} className="w-full rounded-sm" />
             ))}
             <div className="mt-4 text-center">
-               <p className="font-mono text-gray-400 tracking-widest text-sm">SYNCBOOTH</p>
+               <p 
+                className="font-mono tracking-widest text-sm font-bold"
+                style={{ color: activeTheme.id === 'black' ? '#e5e7eb' : '#9ca3af' }}
+               >
+                 SYNCBOOTH
+               </p>
             </div>
           </div>
 
           <button 
             onClick={handleDownload}
-            className="mt-6 bg-gray-900 hover:bg-black text-white font-semibold py-3 px-8 rounded-full shadow-md transition-transform hover:-translate-y-1">
-             Download Strip
+            className="mt-8 bg-gray-900 hover:bg-black text-white font-bold py-4 px-12 rounded-full shadow-xl transition-transform hover:-translate-y-1"
+          >
+            Download High-Res Strip
           </button>
         </div>
       )}
