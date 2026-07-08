@@ -42,13 +42,17 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('start-photoshoot');
   });
 
-  // --- NEW: Synchronize UI State ---
   socket.on('theme-change', (data) => {
     socket.to(data.roomId).emit('theme-change', data.theme);
   });
 
   socket.on('filter-change', (data) => {
     socket.to(data.roomId).emit('filter-change', data.filter);
+  });
+
+  // --- NEW: Sync AI Mode Toggle ---
+  socket.on('toggle-ai', (data) => {
+    socket.to(data.roomId).emit('toggle-ai', data.isAiMode);
   });
 
   socket.on('disconnect', () => {
