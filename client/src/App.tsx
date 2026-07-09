@@ -327,7 +327,7 @@ function App() {
     const imgHeight = 400;
     const padding = 40;
     const gap = 20;
-    const bottomTextSpace = 100;
+  
 
     finalCanvas.width = 680; 
     finalCanvas.height = 1800; 
