@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import * as faceapi from '@vladmandic/face-api';
 
-const socket = io('http://localhost:3001');
+const socket = io('https://virtual-photobooth-server.onrender.com');
 
 const ICE_SERVERS = {
   iceServers: [
